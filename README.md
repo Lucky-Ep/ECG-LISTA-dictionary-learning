@@ -10,7 +10,7 @@ The current goal is to compare the convergence efficiency of traditional ISTA an
 
 The pipeline follows these steps:
 
-1. Load ECG segment data from `ecg_segments_100x4_60s.csv`.
+1. Load ECG segment data from `ecg_segments_100x4_60s.csv` (Due to the large size of the file, it cannot be uploaded at present. Users are requested to generate new training data by themselves.)
 2. Split the dataset by original ECG source to reduce data leakage between training and testing sets.
 3. Train a sparse dictionary using `MiniBatchDictionaryLearning`.
 4. Generate sparse-code targets with ISTA.
