@@ -24,16 +24,18 @@ def use_lista(Xtr, Xts, W_d) -> None:
     ista_MSE = []
     lista_MSE = []
     for i in range(len(T_opt)):
-        print("Current T = ",((2*i)+1))
         T = T_opt[i]
-        # Apply ISTA with T iterations
-        ista_MSE.append(ista_apply(test_loader, T, W_d))
-        # Train and apply LISTA with T iterations / layers
-        lista_MSE.append(lista_apply(train_loader, test_loader, T, W_d))
+        print("Current T = ",T_opt[i])
+        if i == (len(T_opt)-1):
+            ista_MSE.append(ista_apply(test_loader, T, W_d, 0.2, True, Xts[:, 0]))
+            lista_MSE.append(lista_apply(train_loader, test_loader, T, W_d, True, Xts[:, 0].unsqueeze(0)))
+        else:
+            ista_MSE.append(ista_apply(test_loader, T, W_d))
+            lista_MSE.append(lista_apply(train_loader, test_loader, T, W_d))
 
     fig = plt.figure()
     plt.plot(T_opt, ista_MSE, label='ISTA', color='b',linewidth=0.5)
-    plt.plot(T_opt, lista_MSE, label='LISTA', color='r', linewidth=2) 
+    plt.plot(T_opt, lista_MSE, label='LISTA', color='r', linewidth=2)
     plt.xlabel('Number of iterations')
     plt.ylabel('MSE')
     plt.yscale("log")
@@ -41,7 +43,7 @@ def use_lista(Xtr, Xts, W_d) -> None:
     plt.show()
 
 
-def ista(X, W_d, rho=0.5, L=1, max_itr=300) -> torch.Tensor:
+def ista(X, W_d, rho=0.2, L=1, max_itr=3000) -> torch.Tensor:
     z = torch.zeros(W_d.shape[1], dtype=W_d.dtype, device=W_d.device)
     soft_threshold = torch.nn.Softshrink(lambd = rho / L)
     for i in range(max_itr):
@@ -85,8 +87,8 @@ def train(model, train_loader, test_loader, num_epochs=30):
             z_hat = model(b_X)
             loss = F.mse_loss(z_hat, b_z, reduction="mean")
             optimizer.zero_grad()
-            loss.backward()  
-            optimizer.step() 
+            loss.backward()
+            optimizer.step()
             model.zero_grad()
             train_loss += loss.data.item()
         loss_train[epoch] = train_loss / len(train_loader)
@@ -110,16 +112,35 @@ def train(model, train_loader, test_loader, num_epochs=30):
     return loss_test
 
 
-def lista_apply(train_loader, test_loader, T, W_d):
+def lista_apply(train_loader, test_loader, T, W_d, demo_activation: bool = False, X_demo=None):
     n = W_d.shape[0]
     m = W_d.shape[1]
     lista = LISTA_Model(W_d=W_d, T=T)
     loss_test = train(lista, train_loader, test_loader)
+
+    if demo_activation:
+        lista.eval()
+        with torch.no_grad():
+            z_demo = lista(X_demo)
+        x_recon = z_demo @ W_d.T
+        X_plot = X_demo.squeeze(0).cpu().numpy()
+        x_recon_plot = x_recon.squeeze(0).cpu().numpy()
+        plt.figure(figsize=(10, 4))
+        plt.plot(X_plot, label="Original X_demo", linewidth=1)
+        plt.plot(x_recon_plot, label="Reconstructed x_recon", linewidth=1)
+        plt.xlabel("Sample Index")
+        plt.ylabel("Amplitude")
+        plt.title(f"LISTA Reconstruction Comparison (T={T})")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
     err_lista = loss_test[-1]
     return err_lista
 
 
-def ista_apply(test_loader, T, W_d, rho=0.5):
+def ista_apply(test_loader, T, W_d, rho=0.2, demo_activation: bool = False, X_demo=None):
     n = W_d.shape[0]
     m = W_d.shape[1]
     L = torch.linalg.eigvalsh(W_d.T @ W_d).max().item()
@@ -128,6 +149,22 @@ def ista_apply(test_loader, T, W_d, rho=0.5):
     for step, (X, _, z) in enumerate(test_loader.dataset):
         z_hat = ista(X=X, W_d=W_d, rho=rho, L=L, max_itr=T)
         loss += F.mse_loss(z_hat, z, reduction="sum").data.item()
+
+    if demo_activation:
+        z_demo = ista(X=X_demo, W_d=W_d, rho=rho, L=L, max_itr=T)
+        x_recon = z_demo @ W_d.T
+        X_plot = X_demo.squeeze(0).cpu().numpy()
+        x_recon_plot = x_recon.squeeze(0).cpu().numpy()
+        plt.figure(figsize=(10, 4))
+        plt.plot(X_plot, label="Original X_demo", linewidth=1)
+        plt.plot(x_recon_plot, label="Reconstructed x_recon", linewidth=1)
+        plt.xlabel("Sample Index")
+        plt.ylabel("Amplitude")
+        plt.title(f"ISTA Reconstruction Comparison (T={T})")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
 
     return loss/len(test_loader.dataset)
 
