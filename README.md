@@ -1,137 +1,236 @@
-# ECG LISTA Sparse Coding Experiment
+# ECG Denoising with Convolutional Dictionary Learning and ConvLISTA
 
-This project is an experimental pipeline for applying dictionary learning and LISTA (Learned ISTA) to synthetic ECG signals.
+This project implements an ECG signal reconstruction and denoising pipeline based on convolutional dictionary learning, convolutional ISTA, and convolutional LISTA. The main goal is to learn a compact set of local ECG waveform atoms and use them to reconstruct ECG signals with fewer iterative updates than standard ISTA.
 
-The current goal is to compare the convergence efficiency of traditional ISTA and a learned LISTA model. The project first learns a sparse dictionary from ECG signal segments, then uses ISTA-generated sparse codes as training targets for LISTA. Finally, it plots the MSE comparison between ISTA and LISTA under different iteration/layer counts.
+The current version focuses on a convolutional sparse-coding formulation rather than the earlier fully connected dictionary-learning version. The convolutional formulation is better suited for ECG signals because repeated local structures such as QRS complexes, P waves, and T waves can appear at different time positions while sharing similar local morphology.
 
-> Current status: this is a research prototype. The project currently focuses on LISTA convergence comparison. A complete denoised ECG export or application-stage output has not been implemented yet and may be added after further feedback.
+---
 
-## Project Summary
+## Project Overview
 
-The pipeline follows these steps:
+The pipeline has four main stages:
 
-1. Load ECG segment data from `ecg_segments_100x4_60s.csv`.
-2. Split the dataset by original ECG source to reduce data leakage between training and testing sets.
-3. Train a sparse dictionary using `MiniBatchDictionaryLearning`.
-4. Generate sparse-code targets with ISTA.
-5. Train a LISTA model to approximate ISTA solutions more efficiently.
-6. Compare ISTA and LISTA using MSE over different iteration/layer counts.
-7. Display a log-scale MSE plot for convergence comparison.
+1. Load and split ECG signal segments.
+2. Train a 1D convolutional dictionary using SPORCO.
+3. Use convolutional ISTA to generate sparse activation targets.
+4. Train a convolutional LISTA model to approximate the ISTA solution with fewer iterations.
+
+The expected signal format is:
+
+```text
+s: (B, 1, N)
+```
+
+where:
+
+```text
+B = number of ECG segments
+1 = single ECG channel
+N = signal length
+```
+
+The convolutional sparse activation map has shape:
+
+```text
+X: (B, M, T)
+```
+
+where:
+
+```text
+M = number of convolutional dictionary atoms
+T = N - K + 1
+K = atom/filter length
+```
+
+The reconstructed signal is obtained by applying the convolutional synthesis operator:
+
+```text
+s_recon = A(X)
+```
+
+with output shape:
+
+```text
+A(X): (B, 1, T + K - 1) = (B, 1, N)
+```
+
+---
 
 ## Repository Structure
 
-```text
-.
-├── starter.py
-├── data_handler.py
-├── dictionary_training.py
-├── k_fold_alpha_optimize.py
-├── LISTA.py
-├── ecg_segments_100x4_60s.csv
-└── README.md
-```
-
-## File Descriptions
-
 ### `starter.py`
 
-Main entry point of the project.
+Main entry point of the project. It loads the ECG dataset, splits the ECG segments into training and testing groups, trains the convolutional dictionary, converts the SPORCO dictionary into PyTorch format, and runs ConvLISTA training and evaluation.
 
-It loads the ECG segment dataset, splits the data into training and testing sets, trains the dictionary, and then calls the LISTA/ISTA comparison pipeline.
+### `ConvD_dictionary_train.py`
 
-Expected input file:
-
-```text
-ecg_segments_100x4_60s.csv
-```
-
-The current dataset shape is expected to be:
+Contains the convolutional dictionary learning code. The dictionary is trained using SPORCO's `ConvBPDNDictLearn` solver. The learned SPORCO dictionary is then converted into PyTorch `Conv1d` format:
 
 ```text
-(400, 15360)
+D_sporco: (K, 1, 1, M)
+D_torch:  (M, 1, K)
 ```
 
-This corresponds to 100 generated ECG signals, with 4 segments extracted from each signal.
-
-### `data_handler.py`
-
-Handles train/test splitting.
-
-The project uses 100 original ECG signals, each split into 4 segments. To reduce data leakage, the split is performed at the original ECG-signal level rather than randomly mixing all 400 segments directly.
-
-This means that segments from the same generated ECG signal should stay within either the training set or the testing set.
-
-### `dictionary_training.py`
-
-Trains a sparse dictionary using scikit-learn's `MiniBatchDictionaryLearning`.
-
-Default parameters include:
+The current default dictionary settings are:
 
 ```text
-num_atoms = 64
-batch_size = 16
-alpha = 1.0
-max_iter = 500
-random_state = 42
+number of atoms: 16
+filter length:   32
+lambda:          0.1
+main iterations: 5
 ```
 
-The trained dictionary is returned and then passed into the LISTA pipeline.
+Before dictionary learning, each ECG segment is centered and normalized to reduce the influence of DC offset and scale differences.
 
-### `k_fold_alpha_optimize.py`
+### `ConvD_LISTA.py`
 
-Optional helper script for selecting the dictionary learning regularization parameter `alpha`.
+Contains the convolutional ISTA and ConvLISTA implementation.
 
-It evaluates different alpha values using K-fold validation and reports:
-
-- validation MSE
-- average number of nonzero sparse coefficients
-- sparsity ratio
-
-This part is optional and is currently commented out in `starter.py`.
-
-### `LISTA.py`
-
-Contains the ISTA baseline, dataset construction, LISTA model definition, training loop, and comparison plot.
-
-The comparison tests different iteration/layer counts:
+The main components are:
 
 ```text
-T = 1, 3, 5, 7, 9, 11
+apply_A      : convolutional synthesis operator A(X)
+apply_AT     : adjoint analysis operator A.T(y)
+estimate_L   : power-iteration estimate of the Lipschitz constant
+conv_ista    : convolutional ISTA target generator
+LISTA_Model  : learnable convolutional LISTA model
+use_conv_lista : full ISTA/LISTA comparison routine
 ```
 
-For each value of `T`:
+---
 
-- ISTA is applied for `T` iterations.
-- LISTA is trained with `T` layers.
-- The final MSE values are plotted on a log-scale graph.
+## Method
 
-The LISTA model uses learnable parameters initialized from the ISTA update structure:
+### 1. Convolutional Sparse Coding
 
-- encoder matrix `W_e`
-- recurrent matrix `S`
-- threshold parameter `theta`
-
-## Installation
-
-Create and activate a Python environment, then install the required packages:
-
-```bash
-pip install numpy pandas scikit-learn torch matplotlib
-```
-
-Depending on your Python and PyTorch setup, you may prefer to install PyTorch from the official installation page:
+The ECG signal is represented as a sum of shifted local atoms:
 
 ```text
-https://pytorch.org/get-started/locally/
+s ≈ A(X)
 ```
+
+where `D` contains short 1D convolutional atoms and `X` contains the time activation maps.
+
+The sparse coding objective is:
+
+```text
+min_X  1/2 ||A(X) - s||_2^2 + rho ||X||_1
+```
+
+This formulation encourages the model to reconstruct the signal using a small number of meaningful local activations.
+
+---
+
+### 2. Convolutional ISTA
+
+Convolutional ISTA iteratively updates the sparse activation map:
+
+```text
+X <- shrink(X - A.T(A(X) - s) / L, rho / L)
+```
+
+where:
+
+```text
+L = largest eigenvalue of A.T A
+```
+
+In this project, `L` is estimated by power iteration.
+
+ISTA is used as the teacher algorithm. Its output activation map is used as the training target for ConvLISTA.
+
+---
+
+### 3. Convolutional LISTA
+
+ConvLISTA learns a faster update rule inspired by ISTA:
+
+```text
+X_next = shrink(We(s) + S(X_prev), theta)
+```
+
+where:
+
+```text
+We    : learnable Conv1d layer approximating A.T / L
+S     : learnable Conv1d layer approximating I - A.T A / L
+theta : learnable soft-threshold parameter
+```
+
+The two learnable convolutional layers are initialized from the ISTA formula:
+
+```text
+We ≈ A.T / L
+S  ≈ I - A.T A / L
+theta ≈ rho / L
+```
+
+This gives the model a stable ISTA-like starting point, while still allowing it to learn faster update behavior during training.
+
+---
+
+## Results
+
+### ISTA vs LISTA Iteration Efficiency
+
+The following figure compares ISTA and ConvLISTA using the same number of iterations/layers. A lower MSE indicates that the estimated sparse activation map is closer to the ISTA target.
+
+<!-- Insert ISTA vs LISTA iteration-speed comparison figure here -->
+
+```markdown
+![ISTA vs LISTA Iteration Efficiency](assets/conv_lista_vs_ista.png)
+```
+
+**Figure 1.** ConvLISTA reaches a lower activation-map MSE than ISTA at the same small number of iterations, showing that the learned update rule can approximate the ISTA target more efficiently.
+
+---
+
+### ECG Reconstruction Example
+
+The following figure compares the original ECG segment and the reconstructed ECG signal generated from the ConvLISTA activation map.
+
+<!-- Insert ConvLISTA reconstruction comparison figure here -->
+
+```markdown
+![ConvLISTA ECG Reconstruction](assets/conv_lista_reconstruction.png)
+```
+
+**Figure 2.** The reconstructed signal preserves the major ECG rhythm and QRS-like sharp structures. Smaller and broader waveform components such as P and T waves are partially reconstructed, while DC offset and slow baseline components are reduced by preprocessing and the zero-mean convolutional dictionary.
+
+---
+
+## Current Observations
+
+The current ConvLISTA result preserves the dominant periodic ECG structure and the timing of the main sharp peaks. Compared with an overly sparse reconstruction, the current result also begins to recover smaller waveform components between QRS complexes.
+
+However, the reconstructed signal should be interpreted as an algorithmic reconstruction result, not as a clinically validated ECG signal. The model still needs more systematic validation before it can be considered reliable for medical use.
+
+Current strengths:
+
+```text
+- Good preservation of major heartbeat rhythm
+- Good preservation of R-peak timing
+- Partial preservation of QRS morphology
+- Better reconstruction of smaller between-peak structures than the earlier over-sparse version
+- Faster approximation of ISTA-like sparse codes using learned LISTA layers
+```
+
+Current limitations:
+
+```text
+- P and T waves may still be weaker than in the original signal
+- ST-segment and baseline morphology are not clinically reliable
+- Reconstruction amplitude may be compressed
+- The method has not been validated on real clinical ECG datasets
+- The current result is not suitable for medical diagnosis or treatment decisions
+```
+
+---
 
 ## How to Run
 
-Before running the script, place the locally generated ECG dataset file in the project root directory:
-
-```text
-ecg_segments_100x4_60s.csv
-```
+Install the required Python packages, including PyTorch, NumPy, Matplotlib, Pandas, and SPORCO.
 
 Then run:
 
@@ -139,91 +238,48 @@ Then run:
 python starter.py
 ```
 
-The script will:
-
-1. load the ECG dataset,
-2. split training and testing data,
-3. train the dictionary,
-4. generate ISTA targets,
-5. train LISTA models,
-6. compare LISTA and ISTA MSE,
-7. display the convergence plot.
-
-## Dataset
-
-The full ECG dataset file is not included in this repository because it is too large for regular GitHub upload.
-
-The expected dataset file is:
+The main script expects the ECG dataset file:
 
 ```text
-ecg_segments_100x4_60s.csv
+ecg_segments_100x40_6s.csv
 ```
 
-## Data Generation
-
-The ECG data used in this project was generated from synthetic ECG signals. The data generation part was based on external MATLAB code rather than original code written in this repository.
-
-If the external MATLAB code is included in this repository, make sure its original copyright notice, license file, and author information are preserved.
-
-If the external MATLAB code does not have a clear open-source license, the safer choice is **not to upload the MATLAB source code directly**. Instead, link to the original source and cite the related paper or software package in this README.
-
-A suitable attribution section is included below.
-
-## External Code / Data Attribution
-
-Synthetic ECG data generation was based on ECGSYN, a realistic ECG waveform generator.
-
-ECGSYN source:
+The dataset is expected to contain ECG segments in the format:
 
 ```text
-https://physionet.org/content/ecgsyn/
+(num_segments, signal_length)
 ```
 
-MATLAB implementation:
+In the current implementation, the data is converted into PyTorch format with:
 
 ```text
-https://physionet.org/content/ecgsyn/1.0.0/Matlab/
+(B, 1, N)
 ```
 
-Please cite the original ECGSYN publication when using this data generation method:
+before ConvISTA and ConvLISTA are applied.
+
+---
+
+## Notes on Dataset Handling
+
+The full ECG dataset file may be too large to include directly in a GitHub repository. If the dataset is not uploaded, keep the expected filename and shape documented clearly so that users can reproduce the experiment after generating or obtaining the data.
+
+Expected dataset:
 
 ```text
-P. E. McSharry, G. D. Clifford, L. Tarassenko, and L. A. Smith,
-"A dynamical model for generating synthetic electrocardiogram signals,"
-IEEE Transactions on Biomedical Engineering, vol. 50, no. 3, pp. 289-294, 2003.
-DOI: 10.1109/TBME.2003.808805
+ecg_segments_100x40_6s.csv
 ```
 
-## Important Note on Licensing
+Expected shape:
 
-This repository contains my own Python implementation for dictionary learning and LISTA experiments.
+```text
+(4000, 1536)
+```
 
-The ECG data generation code is based on external MATLAB code. Before uploading external source code to GitHub, check its license carefully.
+---
 
-Recommended options:
+## Research Status
 
-1. If the external code has a license that allows redistribution, include the original license and attribution.
-2. If the external code does not clearly allow redistribution, do not upload the code directly.
-3. In that case, provide a link to the original source and explain that users should obtain the data generation code from the original project.
+This project is currently an engineering and research prototype. It demonstrates that convolutional dictionary learning and ConvLISTA can be used to reconstruct ECG-like signals and accelerate sparse-code inference compared with standard ISTA.
 
-## Current Limitations
-
-- The full ECG segment dataset is not included in this repository due to file size limitations.
-- The project currently compares LISTA and ISTA convergence efficiency.
-- A complete denoising output pipeline has not been implemented yet.
-- The current LISTA training target is generated by ISTA sparse codes.
-- The output is mainly an MSE comparison plot rather than a finalized cleaned ECG signal.
-- Further changes may be made after receiving feedback on the experimental direction.
-
-## Possible Future Work
-
-- Add a complete ECG denoising output pipeline.
-- Export reconstructed or denoised ECG signals.
-- Save comparison plots automatically.
-- Add command line arguments for dataset path, dictionary size, alpha, and training epochs.
-- Compare LISTA results against additional sparse coding or denoising baselines.
-- Add more detailed evaluation metrics beyond MSE.
-
-## Disclaimer
-
-This project is for educational and research experimentation only. It is not a medical diagnostic tool and should not be used for clinical decision-making.
+It is not a medical device, not a diagnostic tool, and should not be used for clinical decision-making without extensive validation on real ECG data and appropriate regulatory review.
