@@ -179,7 +179,7 @@ The following figure compares ISTA and ConvLISTA using the same number of iterat
 <!-- Insert ISTA vs LISTA iteration-speed comparison figure here -->
 
 ```markdown
-![ISTA vs LISTA Iteration Efficiency](assets/conv_lista_vs_ista.png)
+![ISTA vs LISTA Iteration Efficiency](./assets/conv_lista_vs_ista.png)
 ```
 
 **Figure 1.** ConvLISTA reaches a lower activation-map MSE than ISTA at the same small number of iterations, showing that the learned update rule can approximate the ISTA target more efficiently.
@@ -193,7 +193,7 @@ The following figure compares the original ECG segment and the reconstructed ECG
 <!-- Insert ConvLISTA reconstruction comparison figure here -->
 
 ```markdown
-![ConvLISTA ECG Reconstruction](assets/conv_lista_reconstruction.png)
+![ConvLISTA ECG Reconstruction](./assets/conv_lista_reconstruction.png)
 ```
 
 **Figure 2.** The reconstructed signal preserves the major ECG rhythm and QRS-like sharp structures. Smaller and broader waveform components such as P and T waves are partially reconstructed, while DC offset and slow baseline components are reduced by preprocessing and the zero-mean convolutional dictionary.
